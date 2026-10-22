@@ -1,0 +1,20 @@
+FROM node:24-alpine AS frontend
+WORKDIR /build
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY index.html vite.config.ts tsconfig.json ./
+COPY src ./src
+RUN npm run build
+
+FROM python:3.12-slim
+WORKDIR /app
+COPY backend/requirements.txt backend/constraints.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+COPY backend/app ./app
+COPY backend/migrations ./migrations
+COPY backend/alembic.ini ./
+COPY --from=frontend /build/dist ./static
+RUN useradd --create-home rally
+USER rally
+EXPOSE 10000
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.render:app --host 0.0.0.0 --port ${PORT:-10000}"]
