@@ -1,0 +1,97 @@
+# Standalone production configuration. Do not merge this with compose.yaml.
+name: rally-production
+
+x-api-environment: &api-environment
+  DATABASE_URL: postgresql+psycopg://rally:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/rally
+  CLUB_TIMEZONE: ${CLUB_TIMEZONE:-America/Los_Angeles}
+  ENVIRONMENT: production
+  COOKIE_SECURE: 'true'
+  ALLOWED_ORIGINS: '["https://${DOMAIN:?Set DOMAIN}"]'
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rally
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: rally
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [database]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U rally -d rally']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    logging: &logging
+      driver: json-file
+      options: {max-size: '10m', max-file: '3'}
+
+  migrate:
+    image: rally-api:${RELEASE_TAG:?Set RELEASE_TAG}
+    build: ./backend
+    environment: *api-environment
+    networks: [database]
+    depends_on:
+      db: {condition: service_healthy}
+    command: [alembic, upgrade, head]
+    logging: *logging
+
+  api:
+    image: rally-api:${RELEASE_TAG:?Set RELEASE_TAG}
+    build: ./backend
+    restart: unless-stopped
+    environment: *api-environment
+    networks: [database, app]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, python, '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    security_opt: ['no-new-privileges:true']
+    logging: *logging
+
+  frontend:
+    image: rally-frontend:${RELEASE_TAG:?Set RELEASE_TAG}
+    build: .
+    restart: unless-stopped
+    networks: [app]
+    volumes:
+      - ./deploy/nginx.production.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, '-q', '-O', /dev/null, 'http://127.0.0.1/']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    logging: *logging
+
+  edge:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL}
+    ports: ['80:80', '443:443']
+    networks: [app, public]
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      frontend: {condition: service_healthy}
+    logging: *logging
+
+networks:
+  database: {internal: true}
+  app: {internal: true}
+  public: {}
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

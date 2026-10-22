@@ -1,0 +1,20 @@
+// Writes fixture accounts. Run only against a disposable local stack.
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+const base=process.env.RALLY_SMOKE_URL || 'http://127.0.0.1:8080';
+const target=new URL(base);
+if(process.env.RALLY_ALLOW_TEST_DATA!=='1' || !['127.0.0.1','localhost'].includes(target.hostname))throw new Error('Set RALLY_ALLOW_TEST_DATA=1 and use a disposable loopback stack.');
+const timeout=()=>AbortSignal.timeout(10000);
+assert.equal((await fetch(base,{signal:timeout()})).status,200);
+assert.equal((await (await fetch(base+'/api/health/ready',{signal:timeout()})).json()).status,'ready');
+const registered=await fetch(base+'/api/auth/register',{method:'POST',signal:timeout(),headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'CI smoke',contact_method:'instagram',contact:'ci_'+randomUUID().replaceAll('-','').slice(0,20),password:randomUUID(),role:'player'})});
+assert.equal(registered.status,201);
+const session=await registered.json();
+const rawCookie=registered.headers.getSetCookie().find(value=>value.startsWith('rally_session='));
+assert.ok(rawCookie?.includes('HttpOnly'));
+const cookie=rawCookie.split(';')[0];
+assert.equal((await fetch(base+'/api/auth/me',{headers:{Cookie:cookie},signal:timeout()})).status,200);
+assert.equal((await fetch(base+'/api/auth/logout',{method:'POST',headers:{Cookie:cookie},signal:timeout()})).status,403);
+assert.equal((await fetch(base+'/api/auth/logout',{method:'POST',headers:{Cookie:cookie,'X-CSRF-Token':session.csrf_token},signal:timeout()})).status,204);
+assert.equal((await fetch(base+'/api/auth/me',{headers:{Cookie:cookie},signal:timeout()})).status,401);
+console.log('Docker smoke passed: frontend, API, registration, session cookie, CSRF, and logout.');

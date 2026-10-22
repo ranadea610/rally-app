@@ -1,0 +1,50 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: rally
+      POSTGRES_PASSWORD: rally
+      POSTGRES_DB: rally
+    ports:
+      - "127.0.0.1:${RALLY_DB_PORT:-5432}:5432"
+    volumes:
+      - rally_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rally -d rally"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  migrate:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://rally:rally@db:5432/rally
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
+  api:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://rally:rally@db:5432/rally
+      CLUB_TIMEZONE: America/Los_Angeles
+      COOKIE_SECURE: "false"
+      ALLOWED_ORIGINS: '["http://localhost:5173","http://127.0.0.1:5173","http://localhost:8080","http://127.0.0.1:8080"]'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${RALLY_API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+  frontend:
+    build: .
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${RALLY_FRONTEND_PORT:-8080}:80"
+volumes:
+  rally_pgdata:

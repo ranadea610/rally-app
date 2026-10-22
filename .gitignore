@@ -3,3 +3,14 @@ dist/
 *.tsbuildinfo
 .env*
 *-deploy.tar.gz
+!.env.example
+!backend/.env.example
+.venv/
+__pycache__/
+.pytest_cache/
+pytest-cache-files-*/
+*.pyc
+test-results/
+playwright-report/
+!deploy/.env.production.example
+backups/

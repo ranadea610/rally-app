@@ -1,0 +1,8 @@
+node_modules
+backend
+.git
+dist
+*.tar.gz
+.env*
+test-results
+playwright-report
